@@ -212,8 +212,10 @@ def index():
     if not current_user.is_authenticated:
         return redirect(url_for('auth.login'))
     
-    # Calculate total account balance
-    total_balance = sum(float(account.get_balance()) for account in current_user.accounts)
+    # Use stored procedure to calculate account balances in a single SQL call
+    account_summaries = Account.get_user_summary(current_user.user_id)
+    balance_by_id = {row['account_id']: float(row['current_balance']) for row in account_summaries}
+    total_balance = sum(balance_by_id.values())
     
     # Get all categories with calculated metrics
     categories = current_user.categories
@@ -243,14 +245,14 @@ def index():
     all_transactions.sort(key=lambda x: x.date, reverse=True)
     recent_transactions = all_transactions[:10]
     
-    # Prepare accounts with balance info
+    # Prepare accounts with balance info using stored procedure results
     accounts_with_balance = [
         {
             'id': account.account_id,
             'name': account.account_name,
             'type': account.account_type,
             'institution': account.institution.institution_name,
-            'balance': float(account.get_balance()),
+            'balance': balance_by_id.get(account.account_id, float(account.get_balance())),
             'website': account.institution.website
         }
         for account in current_user.accounts
@@ -318,8 +320,11 @@ def create_category_form(user_id):
             db.session.add(new_category)
 
         db.session.commit()
-    except Exception:
+    except Exception as e:
         db.session.rollback()
+        # The prevent_negative_budget DB trigger raises this error on invalid input
+        if 'Budget cannot be negative' in str(e):
+            return redirect(url_for('main.budget_page'))
 
     return redirect(url_for('main.budget_page'))
 
@@ -880,10 +885,21 @@ def get_user_accounts(user_id):
             return jsonify({'status': 'error', 'message': 'Cannot view these accounts'}), 403
         
         accounts = Account.query.filter_by(user_id=user_id).all()
-        
+
+        # Use stored procedure for balance calculations
+        summaries = Account.get_user_summary(user_id)
+        balance_by_id = {row['account_id']: float(row['current_balance']) for row in summaries}
+
+        account_list = []
+        for account in accounts:
+            account_data = account.to_dict()
+            if account.account_id in balance_by_id:
+                account_data['balance'] = balance_by_id[account.account_id]
+            account_list.append(account_data)
+
         return jsonify({
             'status': 'success',
-            'accounts': [account.to_dict() for account in accounts]
+            'accounts': account_list
         }), 200
         
     except Exception as e:
@@ -1069,6 +1085,9 @@ def create_category(user_id):
         return jsonify({'status': 'error', 'message': 'Invalid budget value'}), 400
     except Exception as e:
         db.session.rollback()
+        # Catch the error raised by the prevent_negative_budget DB trigger
+        if 'Budget cannot be negative' in str(e):
+            return jsonify({'status': 'error', 'message': 'Budget cannot be negative'}), 400
         return jsonify({'status': 'error', 'message': 'Server error: ' + str(e)}), 500
 
 

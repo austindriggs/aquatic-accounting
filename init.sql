@@ -3,7 +3,10 @@
 -- CS440 Project - Database Design
 -- ==============================================================================
 
--- Drop existing tables if they exist (for clean development)
+-- Drop existing triggers, procedures, and tables if they exist (for clean development)
+DROP TRIGGER IF EXISTS prevent_negative_budget;
+DROP TRIGGER IF EXISTS update_transaction_timestamp;
+DROP PROCEDURE IF EXISTS get_account_summary;
 DROP TABLE IF EXISTS Transaction;
 DROP TABLE IF EXISTS Category;
 DROP TABLE IF EXISTS Account;
@@ -116,3 +119,60 @@ CREATE INDEX idx_transaction_date ON Transaction(date);
 -- Composite indexes for common multi-column filters
 CREATE INDEX idx_transaction_account_date ON Transaction(account_id, date);
 CREATE INDEX idx_transaction_category_date ON Transaction(category_id, date);
+
+-- ==============================================================================
+-- STORED PROCEDURE: get_account_summary
+-- ==============================================================================
+-- Purpose: Returns a balance summary for every account belonging to a user.
+--          Calculates current balance as starting_balance + total inflows - total outflows.
+-- Usage:   CALL get_account_summary(<user_id>);
+DELIMITER $$
+CREATE PROCEDURE get_account_summary(IN p_user_id INT)
+BEGIN
+    SELECT
+        a.account_id,
+        a.account_name,
+        a.account_type,
+        a.starting_balance,
+        COALESCE(SUM(t.inflow),  0) AS total_inflow,
+        COALESCE(SUM(t.outflow), 0) AS total_outflow,
+        a.starting_balance
+            + COALESCE(SUM(t.inflow),  0)
+            - COALESCE(SUM(t.outflow), 0) AS current_balance
+    FROM Account a
+    LEFT JOIN Transaction t ON a.account_id = t.account_id
+    WHERE a.user_id = p_user_id
+    GROUP BY a.account_id, a.account_name, a.account_type, a.starting_balance;
+END$$
+DELIMITER ;
+
+-- ==============================================================================
+-- TRIGGER: prevent_negative_budget
+-- ==============================================================================
+-- Purpose: Enforces a database-level rule that a Category budget cannot be set
+--          to a negative value on INSERT.
+DELIMITER $$
+CREATE TRIGGER prevent_negative_budget
+BEFORE INSERT ON Category
+FOR EACH ROW
+BEGIN
+    IF NEW.budget < 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Budget cannot be negative';
+    END IF;
+END$$
+DELIMITER ;
+
+-- ==============================================================================
+-- TRIGGER: update_transaction_timestamp
+-- ==============================================================================
+-- Purpose: Automatically refreshes the updated_at timestamp on every UPDATE to
+--          a Transaction row, ensuring the audit column is always accurate.
+DELIMITER $$
+CREATE TRIGGER update_transaction_timestamp
+BEFORE UPDATE ON Transaction
+FOR EACH ROW
+BEGIN
+    SET NEW.updated_at = NOW();
+END$$
+DELIMITER ;

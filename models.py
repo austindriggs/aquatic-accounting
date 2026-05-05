@@ -12,6 +12,7 @@ from extensions import db
 from datetime import datetime
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import text
 
 # ==============================================================================
 # USER MODEL
@@ -170,6 +171,20 @@ class Account(db.Model):
         if end_date:
             query = query.filter(Transaction.date <= end_date)
         return query.all()
+
+    @classmethod
+    def get_user_summary(cls, user_id):
+        """Call the get_account_summary stored procedure for a user.
+
+        Returns a list of RowMapping objects with keys:
+          account_id, account_name, account_type, starting_balance,
+          total_inflow, total_outflow, current_balance
+        """
+        result = db.session.execute(
+            text('CALL get_account_summary(:user_id)'),
+            {'user_id': user_id}
+        )
+        return result.mappings().fetchall()
 
 
 # ==============================================================================

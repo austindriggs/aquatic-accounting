@@ -10,4 +10,4 @@ else
   exit 1
 fi
 
-"${COMPOSE_CMD[@]}" down --remove-orphans
+"${COMPOSE_CMD[@]}" down --remove-orphans -v

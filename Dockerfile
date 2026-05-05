@@ -5,9 +5,6 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
-    pkg-config \
-    default-mysql-client \
-    default-libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file
